@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Inspired by Abiola Ibrahim <abiola89@gmail.com>
+set -e
+# Import environment variables
+source ./environment
+
+if [ "$EUID" -ne 0 ] ; then
+  echo "This script uses functionality which requires root privileges"
+  exit 1
+fi
+
+if ! command -v $ACBUILD >/dev/null; then
+    echo "acbuild ($ACBUILD) is not executable"
+    exit 1
+fi
+
+if [ -z "$APP" ] ; then
+  echo "Make sure the environment variables are set"
+    exit 1
+fi
+
+# fetch Nodejs
+curl -SL https://nodejs.org/dist/${VERSION}/${RELEASE}.tar.xz \
+  | tar --no-same-owner -C bin/ -xJ ${RELEASE}
+
+# verify GPG signatures
+
+export GNUPGHOME="$(mktemp -d)"
+gpg --keyserver ha.pool.sks-keyservers.net --recv-keys \
+  9554F04D7259F04124DE6B476D5A82AC7E37093B \
+  94AE36675C464D64BAFA68DD7434390BDBE9B9C5 \
+  0034A06D9D9B0064CE8ADF6BF1747F4AD2306D93 \
+  FD3A5288F042B6850C66B31F09FE44734EB7990E \
+  71DCFD284A79C3B38668286BC97EC7A07EDE3FC1 \
+  DD8F2338BAE7501E3DD5AC78C273792F7D83545D \
+  C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8 \
+  B9AE9905FFD7803F25714661B63B535A4C206CA9
+curl -SL https://nodejs.org/dist/${VERSION}/SHASUMS256.txt.asc | gpg --batch --decrypt | \
+  grep " ${RELEASE}.tar.xz\$" | sha256sum -c | grep . && \
+
+# Based on alpine acbuild
+acbuild --debug begin quay.io/coreos/alpine-sh
+
+# In the event of the script exiting, end the build
+trap "{ export EXT=$?; acbuild --debug end && exit $EXT;}" EXIT
+
+acbuild --debug set-name sdaros/aci-alpine-${APP}
+acbuild --debug annotation add authors "Stefano Da Ros <sdaros@cip.li>"
+acbuild --debug label add version ${VERSION}
+#acbuild --debug label add arch ${ARCH}
+acbuild --debug label add os ${OS}
+acbuild --debug copy ./bin/${RELEASE} /usr/local/src/${RELEASE}
+acbuild --debug set-working-directory /usr/local/src/${RELEASE}
+# Compile then install node.js
+ acbuild --debug run -- apk update
+acbuild --debug run -- apk add --no-cache curl make gcc g++ python \
+  linux-headers binutils-gold gnupg libstdc++
+# Compiling only seems to work after you enter the aci with
+# ```
+# $ sudo rkt run --insecure-options=image --interactive bin/node-v7.5.0-linux-x64.aci -- /bin/sh
+# ```
+acbuild --debug run -- ./configure --prefix=/usr ${CONFIG_FLAGS} && \
+  make -j$(getconf _NPROCESSORS_ONLN) && \
+  make install
+# Install NPM
+acbuild --debug run -- \
+  if [ -x /usr/bin/npm ]; then \
+    npm install -g npm@${NPM_VERSION} && \
+    find /usr/lib/node_modules/npm -name test -o -name .bin -type d | xargs rm -rf; \
+  fi
+acbuild --debug run -- apk del curl make gcc g++ python linux-headers \
+  binutils-gold gnupg ${DEL_PKGS}
+acbuild --debug run -- rm -rf ${RM_DIRS} /${RELEASE}* /usr/share/man '/tmp/*' \
+  '/var/cache/apk/*' /root/.npm /root/.node-gyp /root/.gnupg \
+  /usr/lib/node_modules/npm/man /usr/lib/node_modules/npm/doc \
+  /usr/lib/node_modules/npm/html /usr/lib/node_modules/npm/scripts
+acbuild --debug write --overwrite ${BUILDDIR}/alpine-${RELEASE}.aci
+acbuild end

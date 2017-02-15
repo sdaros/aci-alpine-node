@@ -1,0 +1,14 @@
+BUILDDIR=${BUILDDIR:-bin}
+# A non-installed acbuild can be used, for example:
+# ACBUILD=../../appc/acbuild/bin/acbuild
+ACBUILD=${ACBUILD:-acbuild}
+APP=node
+VERSION=v7.5.0
+NPM_VERSION=4
+OS=linux
+ARCH=x64
+CONFIG_FLAGS="--fully-static --without-npm"
+DEL_PKGS="libstdc++"
+RM_DIRS="/usr/include"
+ACI_PGP_KEY=AC79FE601A89E2C07709A6391FC57C070DAC539A
+RELEASE=${APP}-${VERSION}
